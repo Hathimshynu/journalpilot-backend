@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.api.auth import router as auth_router
 from app.core.database import Base, engine
+from app.core.config import settings
+from app.api.manuscripts import (router as manuscripts_router)
 
 # Import models so SQLAlchemy knows about them
 from app.models.user import User
@@ -20,7 +22,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173",
+        settings.FRONTEND_URL,
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -29,6 +31,7 @@ app.add_middleware(
 
 
 app.include_router(auth_router)
+app.include_router(manuscripts_router)
 
 
 @app.get("/")

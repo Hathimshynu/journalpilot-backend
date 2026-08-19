@@ -4,6 +4,7 @@ from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from sqlalchemy.orm import relationship
 
 
 class User(Base):
@@ -52,4 +53,10 @@ class User(Base):
         DateTime,
         default=datetime.utcnow,
         nullable=False,
+    )
+    
+    manuscripts = relationship(
+        "Manuscript",
+        back_populates="user",
+        cascade="all, delete-orphan",
     )
