@@ -83,3 +83,10 @@ class Manuscript(Base):
         "User",
         back_populates="manuscripts",
     )
+    
+    analysis = relationship(
+        "ManuscriptAnalysis",
+        back_populates="manuscript",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )

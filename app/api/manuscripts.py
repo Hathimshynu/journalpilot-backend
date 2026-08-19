@@ -1,4 +1,5 @@
 import uuid
+import json
 from pathlib import Path
 from fastapi.responses import FileResponse
 
@@ -22,6 +23,19 @@ from app.schemas.manuscript import (
     ManuscriptResponse,
 )
 from app.services.document_service import extract_text
+
+from app.models.manuscript_analysis import (
+    ManuscriptAnalysis,
+)
+
+from app.services.ai_service import (
+    analyze_manuscript,
+)
+
+from app.schemas.analysis import (
+    AnalysisResponse,
+    ManuscriptAnalysisResult,
+)
 
 
 router = APIRouter(
@@ -283,13 +297,237 @@ def get_manuscript(
 
 
     return manuscript
+
+# ==================================================
+# ANALYZE MANUSCRIPT
+# ==================================================
+
+@router.post(
+    "/{manuscript_id}/analyze",
+    response_model=AnalysisResponse,
+)
+def analyze_manuscript_endpoint(
+    manuscript_id: int,
+
+    current_user: User = Depends(
+        get_current_user
+    ),
+
+    db: Session = Depends(get_db),
+):
+
+    # -----------------------------------------
+    # Find manuscript
+    # -----------------------------------------
+
+    manuscript = (
+        db.query(Manuscript)
+        .filter(
+            Manuscript.id == manuscript_id,
+            Manuscript.user_id == current_user.id,
+        )
+        .first()
+    )
+
+
+    if not manuscript:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Manuscript not found",
+        )
+
+
+    # -----------------------------------------
+    # Check extracted text
+    # -----------------------------------------
+
+    if not manuscript.extracted_text:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No extracted text is available "
+                "for this manuscript."
+            ),
+        )
+
+
+    # -----------------------------------------
+    # Run AI analysis
+    # -----------------------------------------
+
+    try:
+
+        result = analyze_manuscript(
+            manuscript.extracted_text
+        )
+
+    except Exception as error:
+
+        print(
+            "AI analysis error:",
+            error,
+        )
+
+        raise HTTPException(
+            status_code=503,
+            detail=f"AI service unavailable: {str(error)}",
+        )
+
+
+    # -----------------------------------------
+    # Check existing analysis
+    # -----------------------------------------
+
+    analysis = (
+        db.query(ManuscriptAnalysis)
+        .filter(
+            ManuscriptAnalysis.manuscript_id
+            == manuscript.id
+        )
+        .first()
+    )
+
+
+    analysis_json = (
+        result.model_dump_json()
+    )
+
+
+    # -----------------------------------------
+    # Update existing analysis
+    # -----------------------------------------
+
+    if analysis:
+
+        analysis.overall_score = (
+            result.overall_score
+        )
+
+        analysis.analysis_json = (
+            analysis_json
+        )
+
+
+    # -----------------------------------------
+    # Create new analysis
+    # -----------------------------------------
+
+    else:
+
+        analysis = ManuscriptAnalysis(
+
+            manuscript_id=manuscript.id,
+
+            overall_score=(
+                result.overall_score
+            ),
+
+            analysis_json=analysis_json,
+        )
+
+        db.add(analysis)
+
+
+    db.commit()
+
+    db.refresh(analysis)
+
+
+    return {
+        "id": analysis.id,
+
+        "manuscript_id": (
+            analysis.manuscript_id
+        ),
+
+        "overall_score": (
+            analysis.overall_score
+        ),
+
+        "analysis": result,
+
+        "created_at": (
+            analysis.created_at.isoformat()
+        ),
+    }
+    # -----------------------------------------------
+    
+@router.get(
+    "/{manuscript_id}/analysis",
+)
+def get_manuscript_analysis(
+    manuscript_id: int,
+
+    current_user: User = Depends(
+        get_current_user
+    ),
+
+    db: Session = Depends(get_db),
+):
+
+    manuscript = (
+        db.query(Manuscript)
+        .filter(
+            Manuscript.id == manuscript_id,
+            Manuscript.user_id == current_user.id,
+        )
+        .first()
+    )
+
+
+    if not manuscript:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Manuscript not found",
+        )
+
+
+    analysis = (
+        db.query(ManuscriptAnalysis)
+        .filter(
+            ManuscriptAnalysis.manuscript_id
+            == manuscript.id
+        )
+        .first()
+    )
+
+
+    if not analysis:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Analysis not found",
+        )
+
+
+    return {
+        "id": analysis.id,
+
+        "manuscript_id": (
+            analysis.manuscript_id
+        ),
+
+        "overall_score": (
+            analysis.overall_score
+        ),
+
+        "analysis": json.loads(
+            analysis.analysis_json
+        ),
+
+        "created_at": (
+            analysis.created_at.isoformat()
+        ),
+    }    
 # ==================================================
 # 4. VIEW / DOWNLOAD MANUSCRIPT FILE
 # ==================================================
 
-@router.get(
-    "/{manuscript_id}/file",
-)
+@router.get("/{manuscript_id}/file")
+
 def view_manuscript_file(
     manuscript_id: int,
     current_user: User = Depends(
